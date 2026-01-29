@@ -19,6 +19,7 @@ mom_registry:
   "models/mom-embedding-pro": "Qwen/Qwen3-Embedding-0.6B"
   "models/mom-embedding-flash": "google/embeddinggemma-300m"
   "models/mom-embedding-light": "sentence-transformers/all-MiniLM-L12-v2"
+  "models/mom-embedding-ultra": "llm-semantic-router/mmbert-embed-32k-2d-matryoshka"
 
 # Response API Configuration
 # Enables OpenAI Response API support with conversation chaining
