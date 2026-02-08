@@ -20,7 +20,7 @@ on:
         type: boolean
         default: true
   push:
-    branches: ["main"]
+    branches: ["main", "docker-publish-fork"]
     paths:
       - ".github/workflows/docker-publish.yml"
       - "tools/docker/Dockerfile*"
@@ -46,7 +46,7 @@ concurrency:
 jobs:
   # Build multi-architecture Docker images using buildx native multi-platform support
   build_multiarch:
-    if: github.repository == 'vllm-project/semantic-router' && !github.event.pull_request.draft
+    if: (github.repository == 'vllm-project/semantic-router' || github.repository == 'mkoushni/semantic-router') && (!github.event.pull_request.draft || github.event_name != 'pull_request')
     runs-on: ubuntu-latest
     permissions:
       contents: read
