@@ -86,7 +86,7 @@ RUN cd candle-binding && \
     if [ "$TARGETARCH" = "arm64" ]; then \
         OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu cargo build --release --no-default-features --target aarch64-unknown-linux-gnu; \
     else \
-        OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu cargo build --release --no-default-features; \
+        OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu cargo build --release --no-default-features --target x86_64-unknown-linux-gnu; \
     fi && \
     rm -rf src
 
@@ -94,8 +94,10 @@ RUN cd candle-binding && \
 COPY candle-binding/src/ ./candle-binding/src/
 
 # Build with cross-compilation (reuses dependency cache from previous layer)
+# Remove stale .so from pre-build dummy so cargo rebuilds the real library
 RUN echo "Building Rust library (CPU-only, no CUDA)..." && \
     cd candle-binding && \
+    find target -name "libcandle_semantic_router.so" -delete 2>/dev/null; \
     if [ "$TARGETARCH" = "arm64" ]; then \
         export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc; \
         export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc; \
