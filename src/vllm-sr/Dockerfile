@@ -26,26 +26,6 @@ RUN mkdir -p /build/out && \
       cp target/release/libcandle_semantic_router.so target/release/libcandle_semantic_router.a /build/out/ 2>/dev/null || cp target/release/libcandle_semantic_router.so /build/out/; \
     fi
 
-# Stage 1a: Build Rust ml-binding (for ML model selection: KNN, KMeans, SVM)
-FROM --platform=$BUILDPLATFORM rustlang/rust:nightly AS ml-rust-builder
-ARG TARGETARCH
-ARG GIT_SSL_NO_VERIFY
-WORKDIR /build
-ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
-COPY ml-binding/ .
-RUN [ "$GIT_SSL_NO_VERIFY" = "1" ] && git config --global http.sslVerify false || true; \
-    if [ "$TARGETARCH" = "arm64" ]; then \
-      apt-get update && apt-get install -y gcc-aarch64-linux-gnu && rm -rf /var/lib/apt/lists/* && \
-      rustup target add aarch64-unknown-linux-gnu && \
-      export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc && \
-      cargo build --release --target aarch64-unknown-linux-gnu; \
-    else \
-      cargo build --release; \
-    fi
-RUN mkdir -p /build/out && \
-    if [ "$TARGETARCH" = "arm64" ]; then cp target/aarch64-unknown-linux-gnu/release/libml_semantic_router.so /build/out/ 2>/dev/null || true; \
-    else cp target/release/libml_semantic_router.so /build/out/; fi
-
 # Stage 1b: Build dashboard frontend with Node.js
 FROM node:20-alpine AS frontend-builder
 WORKDIR /app/frontend
@@ -86,15 +66,11 @@ WORKDIR /build
 
 # Copy from normalized /build/out/ (set in rust stages)
 COPY --from=rust-builder /build/out/ /usr/local/lib/
-COPY --from=ml-rust-builder /build/out/libml_semantic_router.so /usr/local/lib/
 
 ENV LD_LIBRARY_PATH=/usr/local/lib
 
 # Copy candle-binding Go files (needed for go.mod replace directive)
 COPY --from=rust-builder /build/go.mod /build/semantic-router.go /build/../candle-binding/
-
-# Copy ml-binding Go files (needed for ML model selection - go.mod replace directive)
-COPY --from=ml-rust-builder /build/go.mod /build/ml_binding.go /build/../ml-binding/
 
 # Copy Go source
 COPY src/semantic-router/ .
@@ -127,7 +103,6 @@ RUN set -eux; \
 # Copy binaries from builders (rust artifacts from normalized /build/out/)
 COPY --from=go-builder /build/router /usr/local/bin/router
 COPY --from=rust-builder /build/out/libcandle_semantic_router.so /usr/local/lib/
-COPY --from=ml-rust-builder /build/out/libml_semantic_router.so /usr/local/lib/
 COPY --from=envoy /usr/local/bin/envoy /usr/local/bin/envoy
 COPY --from=dashboard-builder /app/dashboard-backend /usr/local/bin/dashboard-backend
 COPY --from=frontend-builder /app/frontend/dist /app/frontend
