@@ -1,14 +1,50 @@
-# Multi-stage Dockerfile for vLLM Semantic Router
+# Multi-stage Dockerfile for vLLM Semantic Router (cross-compile arm64 on BUILDPLATFORM to avoid QEMU)
+ARG TARGETARCH=amd64
+ARG BUILDPLATFORM=linux/amd64
+ARG GIT_SSL_NO_VERIFY=0
 # Stage 1: Build Rust candle-binding (CPU-only)
-# Use nightly Rust because candle-core uses unstable features
-FROM rustlang/rust:nightly AS rust-builder
+FROM --platform=$BUILDPLATFORM rustlang/rust:nightly AS rust-builder
+ARG TARGETARCH
+ARG GIT_SSL_NO_VERIFY
 WORKDIR /build
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 COPY candle-binding/ .
-# Build with CPU-only (no CUDA) - disable default features which include cuda
-RUN cargo build --release --no-default-features && \
-    echo "Checking built library:" && \
-    find target -name "*.so" -type f && \
-    ls -la target/release/
+RUN [ "$GIT_SSL_NO_VERIFY" = "1" ] && git config --global http.sslVerify false || true; \
+    if [ "$TARGETARCH" = "arm64" ]; then \
+      apt-get update && apt-get install -y gcc-aarch64-linux-gnu && rm -rf /var/lib/apt/lists/* && \
+      rustup target add aarch64-unknown-linux-gnu && \
+      export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc && \
+      cargo build --release --no-default-features --target aarch64-unknown-linux-gnu; \
+    else \
+      cargo build --release --no-default-features; \
+    fi
+RUN mkdir -p /build/out && \
+    if [ "$TARGETARCH" = "arm64" ]; then \
+      cp target/aarch64-unknown-linux-gnu/release/libcandle_semantic_router.so /build/out/ && \
+      (cp target/aarch64-unknown-linux-gnu/release/libcandle_semantic_router.a /build/out/ 2>/dev/null || true); \
+    else \
+      cp target/release/libcandle_semantic_router.so target/release/libcandle_semantic_router.a /build/out/ 2>/dev/null || cp target/release/libcandle_semantic_router.so /build/out/; \
+    fi
+
+# Stage 1a: Build Rust ml-binding (for ML model selection: KNN, KMeans, SVM)
+FROM --platform=$BUILDPLATFORM rustlang/rust:nightly AS ml-rust-builder
+ARG TARGETARCH
+ARG GIT_SSL_NO_VERIFY
+WORKDIR /build
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
+COPY ml-binding/ .
+RUN [ "$GIT_SSL_NO_VERIFY" = "1" ] && git config --global http.sslVerify false || true; \
+    if [ "$TARGETARCH" = "arm64" ]; then \
+      apt-get update && apt-get install -y gcc-aarch64-linux-gnu && rm -rf /var/lib/apt/lists/* && \
+      rustup target add aarch64-unknown-linux-gnu && \
+      export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc && \
+      cargo build --release --target aarch64-unknown-linux-gnu; \
+    else \
+      cargo build --release; \
+    fi
+RUN mkdir -p /build/out && \
+    if [ "$TARGETARCH" = "arm64" ]; then cp target/aarch64-unknown-linux-gnu/release/libml_semantic_router.so /build/out/ 2>/dev/null || true; \
+    else cp target/release/libml_semantic_router.so /build/out/; fi
 
 # Stage 1b: Build dashboard frontend with Node.js
 FROM node:20-alpine AS frontend-builder
@@ -21,50 +57,62 @@ COPY dashboard/frontend/ ./
 RUN npm run build
 
 # Stage 1c: Build dashboard backend with Go
-# Note: dashboard/backend/go.mod has a replace directive for src/semantic-router
-FROM golang:1.24 AS dashboard-builder
+FROM --platform=$BUILDPLATFORM golang:1.24 AS dashboard-builder
+ARG TARGETARCH
 WORKDIR /app
 
-# Use Go proxy for reliable downloads
 ENV GOPROXY=https://proxy.golang.org,direct
 
-# Copy src/semantic-router first (required by dashboard/backend/go.mod replace directive)
 COPY src/semantic-router/go.mod src/semantic-router/go.sum /app/src/semantic-router/
 COPY src/semantic-router/pkg/config/ /app/src/semantic-router/pkg/config/
 COPY src/semantic-router/pkg/observability/ /app/src/semantic-router/pkg/observability/
 
-# Copy go.mod and go.sum first for better caching
 COPY dashboard/backend/go.mod dashboard/backend/go.sum /app/dashboard/backend/
 WORKDIR /app/dashboard/backend
 RUN go mod download
 
-# Copy source code and build
 COPY dashboard/backend/ /app/dashboard/backend/
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /app/dashboard-backend main.go
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+      apt-get update && apt-get install -y gcc-aarch64-linux-gnu && rm -rf /var/lib/apt/lists/* && \
+      CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags="-w -s" -o /app/dashboard-backend main.go; \
+    else \
+      CGO_ENABLED=1 GOOS=linux go build -ldflags="-w -s" -o /app/dashboard-backend main.go; \
+    fi
 
 # Stage 2: Build Go semantic router
-FROM golang:1.24 AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.24 AS go-builder
+ARG TARGETARCH
 WORKDIR /build
 
-# Copy candle-binding library for CGO linking
-COPY --from=rust-builder /build/target/release/libcandle_semantic_router.so /usr/local/lib/
-COPY --from=rust-builder /build/target/release/libcandle_semantic_router.a /usr/local/lib/
+# Copy from normalized /build/out/ (set in rust stages)
+COPY --from=rust-builder /build/out/ /usr/local/lib/
+COPY --from=ml-rust-builder /build/out/libml_semantic_router.so /usr/local/lib/
+
 ENV LD_LIBRARY_PATH=/usr/local/lib
 
 # Copy candle-binding Go files (needed for go.mod replace directive)
 COPY --from=rust-builder /build/go.mod /build/semantic-router.go /build/../candle-binding/
 
+# Copy ml-binding Go files (needed for ML model selection - go.mod replace directive)
+COPY --from=ml-rust-builder /build/go.mod /build/ml_binding.go /build/../ml-binding/
+
 # Copy Go source
 COPY src/semantic-router/ .
 
-# Build router
-RUN CGO_ENABLED=1 go build -o router cmd/main.go
+# Build router (cross-compile for arm64 when TARGETARCH=arm64)
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+      apt-get update && apt-get install -y gcc-aarch64-linux-gnu && rm -rf /var/lib/apt/lists/* && \
+      CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -o router cmd/main.go; \
+    else \
+      CGO_ENABLED=1 go build -o router cmd/main.go; \
+    fi
 
 # Stage 3: Get Envoy binary
 FROM envoyproxy/envoy:v1.34-latest AS envoy
 
 # Stage 4: Final runtime image
 FROM python:3.12-slim
+ARG GIT_SSL_NO_VERIFY
 
 # Install system dependencies
 RUN set -eux; \
@@ -76,9 +124,10 @@ RUN set -eux; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/*
 
-# Copy binaries from builders
+# Copy binaries from builders (rust artifacts from normalized /build/out/)
 COPY --from=go-builder /build/router /usr/local/bin/router
-COPY --from=rust-builder /build/target/release/libcandle_semantic_router.so /usr/local/lib/
+COPY --from=rust-builder /build/out/libcandle_semantic_router.so /usr/local/lib/
+COPY --from=ml-rust-builder /build/out/libml_semantic_router.so /usr/local/lib/
 COPY --from=envoy /usr/local/bin/envoy /usr/local/bin/envoy
 COPY --from=dashboard-builder /app/dashboard-backend /usr/local/bin/dashboard-backend
 COPY --from=frontend-builder /app/frontend/dist /app/frontend
@@ -97,8 +146,17 @@ COPY src/vllm-sr/requirements.txt /app/requirements.txt
 # Copy tools database to config directory
 COPY src/vllm-sr/cli/templates/tools_db.json /app/config/tools_db.json
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy bench directory for evaluation benchmarks
+COPY bench/ /app/bench/
+
+# Copy training/model_eval directory for signal evaluation
+COPY src/training/model_eval/ /app/src/training/model_eval/
+
+# GIT_SSL_NO_VERIFY=1: add --trusted-host for pypi (proxy)
+RUN if [ "$GIT_SSL_NO_VERIFY" = "1" ]; then PIP_EXTRA="--trusted-host pypi.org --trusted-host files.pythonhosted.org"; else PIP_EXTRA=""; fi && \
+    pip install $PIP_EXTRA --no-cache-dir -r requirements.txt && \
+    pip install $PIP_EXTRA --no-cache-dir -r /app/bench/requirements.txt && \
+    pip install $PIP_EXTRA --no-cache-dir -r /app/src/training/model_eval/requirements.txt
 
 # Copy start scripts
 COPY src/vllm-sr/start-router.sh /app/start-router.sh
@@ -108,8 +166,10 @@ RUN chmod +x /app/start-router.sh /app/start-dashboard.sh
 # Copy supervisord configuration
 COPY src/vllm-sr/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Create log files
-RUN touch /var/log/envoy_access.log /var/log/supervisor/supervisord.log
+# Create log files and directories with proper permissions for non-root
+RUN touch /var/log/envoy_access.log /var/log/supervisor/supervisord.log && \
+    chmod 666 /var/log/envoy_access.log /var/log/supervisor/supervisord.log && \
+    chmod 777 /var/log /var/log/supervisor /var/run
 
 # Expose ports
 # Note: Listener ports are configured in config.yaml and mapped dynamically

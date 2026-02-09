@@ -182,7 +182,7 @@ jobs:
         run: |
           if [ "${{ matrix.image }}" = "extproc" ]; then
             echo "context=." >> $GITHUB_OUTPUT
-            echo "dockerfile=./tools/docker/Dockerfile.extproc" >> $GITHUB_OUTPUT
+            echo "dockerfile=./tools/docker/Dockerfile.extproc${{ github.event_name == 'push' && '.cross' || '' }}" >> $GITHUB_OUTPUT
           elif [ "${{ matrix.image }}" = "llm-katan" ]; then
             echo "context=./e2e/testing/llm-katan" >> $GITHUB_OUTPUT
             echo "dockerfile=./e2e/testing/llm-katan/Dockerfile" >> $GITHUB_OUTPUT
@@ -246,7 +246,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
           build-args: |
             BUILDKIT_INLINE_CACHE=1
-            CARGO_BUILD_JOBS=${{ github.event_name == 'pull_request' && '8' || '16' }}
+            CARGO_BUILD_JOBS=${{ github.event_name == 'pull_request' && '8' || '20' }}
             CARGO_INCREMENTAL=1
             RUSTC_WRAPPER=""
             CARGO_NET_GIT_FETCH_WITH_CLI=true
