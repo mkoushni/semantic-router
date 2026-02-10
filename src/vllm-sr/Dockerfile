@@ -13,11 +13,12 @@ ARG GIT_SSL_NO_VERIFY
 WORKDIR /build
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
-# Install cross-compilation toolchain and OpenSSL for arm64 (needed by hf-hub -> openssl-sys)
+# Install cross-compilation toolchain and OpenSSL for arm64 (needed by hf-hub -> openssl-sys, esaxx-rs -> g++)
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
       dpkg --add-architecture arm64 && \
       apt-get update && apt-get install -y \
         gcc-aarch64-linux-gnu \
+        g++-aarch64-linux-gnu \
         libssl-dev:arm64 \
         libssl-dev \
         pkg-config && \
@@ -26,11 +27,15 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
     fi
 
 # Configure cross-compilation environment for arm64
+# NOTE: Do NOT set OPENSSL_DIR globally — it breaks amd64 pkg-config discovery.
+# The rustlang/rust:nightly image (Debian) has libssl-dev pre-installed and
+# pkg-config finds it automatically for amd64. For arm64, we set OPENSSL_LIB_DIR
+# per-command below.
 ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+ENV CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+ENV CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
 ENV PKG_CONFIG_ALLOW_CROSS=1
 ENV PKG_CONFIG_PATH_aarch64_unknown_linux_gnu=/usr/lib/aarch64-linux-gnu/pkgconfig
-ENV OPENSSL_DIR=/usr
-ENV OPENSSL_INCLUDE_DIR=/usr/include/openssl
 
 # Copy Cargo manifest first for dependency caching
 COPY candle-binding/Cargo.toml candle-binding/Cargo.loc[k] ./
