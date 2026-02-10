@@ -1,7 +1,9 @@
 # Multi-stage Dockerfile for vLLM Semantic Router
 # Cross-compiles arm64 on BUILDPLATFORM (amd64) to avoid slow QEMU emulation.
-ARG TARGETARCH=amd64
-ARG BUILDPLATFORM=linux/amd64
+# NOTE: TARGETARCH and BUILDPLATFORM are automatic BuildKit variables.
+# Do NOT set defaults — they would override BuildKit's platform detection.
+ARG TARGETARCH
+ARG BUILDPLATFORM
 ARG GIT_SSL_NO_VERIFY=0
 
 # Stage 1: Build Rust candle-binding (CPU-only, cross-compiled for TARGETARCH)
