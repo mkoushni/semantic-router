@@ -53,7 +53,7 @@ jobs:
       && (github.repository == 'vllm-project/semantic-router' || github.repository == 'mkoushni/semantic-router')
       && !github.event.pull_request.draft
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     permissions:
       contents: read
       packages: write
