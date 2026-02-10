@@ -13,6 +13,25 @@ ARG GIT_SSL_NO_VERIFY
 WORKDIR /build
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
+# Install cross-compilation toolchain and OpenSSL for arm64 (needed by hf-hub -> openssl-sys)
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+      dpkg --add-architecture arm64 && \
+      apt-get update && apt-get install -y \
+        gcc-aarch64-linux-gnu \
+        libssl-dev:arm64 \
+        libssl-dev \
+        pkg-config && \
+      rm -rf /var/lib/apt/lists/* && \
+      rustup target add aarch64-unknown-linux-gnu; \
+    fi
+
+# Configure cross-compilation environment for arm64
+ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+ENV PKG_CONFIG_ALLOW_CROSS=1
+ENV PKG_CONFIG_PATH_aarch64_unknown_linux_gnu=/usr/lib/aarch64-linux-gnu/pkgconfig
+ENV OPENSSL_DIR=/usr
+ENV OPENSSL_INCLUDE_DIR=/usr/include/openssl
+
 # Copy Cargo manifest first for dependency caching
 COPY candle-binding/Cargo.toml candle-binding/Cargo.loc[k] ./
 
@@ -20,9 +39,7 @@ COPY candle-binding/Cargo.toml candle-binding/Cargo.loc[k] ./
 RUN [ "$GIT_SSL_NO_VERIFY" = "1" ] && git config --global http.sslVerify false || true; \
     mkdir -p src && echo "pub fn _dummy() {}" > src/lib.rs && \
     if [ "$TARGETARCH" = "arm64" ]; then \
-      apt-get update && apt-get install -y gcc-aarch64-linux-gnu && rm -rf /var/lib/apt/lists/* && \
-      rustup target add aarch64-unknown-linux-gnu && \
-      export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc && \
+      OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu \
       cargo build --release --no-default-features --target aarch64-unknown-linux-gnu; \
     else \
       cargo build --release --no-default-features; \
@@ -37,7 +54,7 @@ COPY candle-binding/go.mod candle-binding/semantic-router.go ./
 RUN find target -name "libcandle_semantic_router.so" -delete 2>/dev/null; \
     find target -name "libcandle_semantic_router.a" -delete 2>/dev/null; \
     if [ "$TARGETARCH" = "arm64" ]; then \
-      export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc && \
+      OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu \
       cargo build --release --no-default-features --target aarch64-unknown-linux-gnu; \
     else \
       cargo build --release --no-default-features; \
