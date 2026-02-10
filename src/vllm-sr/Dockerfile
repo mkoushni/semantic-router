@@ -1,15 +1,22 @@
-# Multi-stage Dockerfile for vLLM Semantic Router (cross-compile arm64 on BUILDPLATFORM to avoid QEMU)
+# Multi-stage Dockerfile for vLLM Semantic Router
+# Cross-compiles arm64 on BUILDPLATFORM (amd64) to avoid slow QEMU emulation.
 ARG TARGETARCH=amd64
 ARG BUILDPLATFORM=linux/amd64
 ARG GIT_SSL_NO_VERIFY=0
-# Stage 1: Build Rust candle-binding (CPU-only)
+
+# Stage 1: Build Rust candle-binding (CPU-only, cross-compiled for TARGETARCH)
 FROM --platform=$BUILDPLATFORM rustlang/rust:nightly AS rust-builder
 ARG TARGETARCH
 ARG GIT_SSL_NO_VERIFY
 WORKDIR /build
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
-COPY candle-binding/ .
+
+# Copy Cargo manifest first for dependency caching
+COPY candle-binding/Cargo.toml candle-binding/Cargo.loc[k] ./
+
+# Pre-build dependencies with a dummy source for layer caching
 RUN [ "$GIT_SSL_NO_VERIFY" = "1" ] && git config --global http.sslVerify false || true; \
+    mkdir -p src && echo "pub fn _dummy() {}" > src/lib.rs && \
     if [ "$TARGETARCH" = "arm64" ]; then \
       apt-get update && apt-get install -y gcc-aarch64-linux-gnu && rm -rf /var/lib/apt/lists/* && \
       rustup target add aarch64-unknown-linux-gnu && \
@@ -17,14 +24,37 @@ RUN [ "$GIT_SSL_NO_VERIFY" = "1" ] && git config --global http.sslVerify false |
       cargo build --release --no-default-features --target aarch64-unknown-linux-gnu; \
     else \
       cargo build --release --no-default-features; \
+    fi && \
+    rm -rf src
+
+# Copy real source and rebuild (dependencies are cached from above)
+COPY candle-binding/src/ ./src/
+COPY candle-binding/go.mod candle-binding/semantic-router.go ./
+
+# Delete stale library from dummy build so cargo relinks with real FFI symbols
+RUN find target -name "libcandle_semantic_router.so" -delete 2>/dev/null; \
+    find target -name "libcandle_semantic_router.a" -delete 2>/dev/null; \
+    if [ "$TARGETARCH" = "arm64" ]; then \
+      export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc && \
+      cargo build --release --no-default-features --target aarch64-unknown-linux-gnu; \
+    else \
+      cargo build --release --no-default-features; \
     fi
+
+# Normalize output: copy built artifacts to /build/out/
 RUN mkdir -p /build/out && \
     if [ "$TARGETARCH" = "arm64" ]; then \
       cp target/aarch64-unknown-linux-gnu/release/libcandle_semantic_router.so /build/out/ && \
       (cp target/aarch64-unknown-linux-gnu/release/libcandle_semantic_router.a /build/out/ 2>/dev/null || true); \
     else \
-      cp target/release/libcandle_semantic_router.so target/release/libcandle_semantic_router.a /build/out/ 2>/dev/null || cp target/release/libcandle_semantic_router.so /build/out/; \
-    fi
+      cp target/release/libcandle_semantic_router.so /build/out/ && \
+      (cp target/release/libcandle_semantic_router.a /build/out/ 2>/dev/null || true); \
+    fi && \
+    echo "=== Built library ===" && \
+    ls -la /build/out/ && \
+    file /build/out/libcandle_semantic_router.so && \
+    echo "Exported symbol count:" && \
+    nm -D /build/out/libcandle_semantic_router.so 2>/dev/null | grep -c " T " || true
 
 # Stage 1b: Build dashboard frontend with Node.js
 FROM node:20-alpine AS frontend-builder
@@ -72,15 +102,16 @@ ENV LD_LIBRARY_PATH=/usr/local/lib
 # Copy candle-binding Go files (needed for go.mod replace directive)
 COPY --from=rust-builder /build/go.mod /build/semantic-router.go /build/../candle-binding/
 
-# Copy Go source
+# Copy Go source (go.mod has local replace directives, so go mod download
+# requires candle-binding to be present first)
 COPY src/semantic-router/ .
 
 # Build router (cross-compile for arm64 when TARGETARCH=arm64)
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
       apt-get update && apt-get install -y gcc-aarch64-linux-gnu && rm -rf /var/lib/apt/lists/* && \
-      CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -o router cmd/main.go; \
+      CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags="-w -s" -o router cmd/main.go; \
     else \
-      CGO_ENABLED=1 go build -o router cmd/main.go; \
+      CGO_ENABLED=1 go build -ldflags="-w -s" -o router cmd/main.go; \
     fi
 
 # Stage 3: Get Envoy binary
