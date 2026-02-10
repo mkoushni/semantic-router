@@ -131,9 +131,18 @@ COPY --from=rust-builder /build/go.mod /build/semantic-router.go /build/../candl
 COPY src/semantic-router/ .
 
 # Build router (cross-compile for arm64 when TARGETARCH=arm64)
+# arm64: need libssl-dev:arm64 because libcandle_semantic_router.so dynamically links OpenSSL
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
-      apt-get update && apt-get install -y gcc-aarch64-linux-gnu && rm -rf /var/lib/apt/lists/* && \
-      CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags="-w -s" -o router cmd/main.go; \
+      dpkg --add-architecture arm64 && \
+      apt-get update && apt-get install -y \
+        gcc-aarch64-linux-gnu \
+        g++-aarch64-linux-gnu \
+        libssl-dev:arm64 && \
+      rm -rf /var/lib/apt/lists/* && \
+      CC=aarch64-linux-gnu-gcc \
+      CGO_ENABLED=1 GOOS=linux GOARCH=arm64 \
+      CGO_LDFLAGS="-L/usr/lib/aarch64-linux-gnu -lssl -lcrypto" \
+      go build -ldflags="-w -s" -o router cmd/main.go; \
     else \
       CGO_ENABLED=1 go build -ldflags="-w -s" -o router cmd/main.go; \
     fi
