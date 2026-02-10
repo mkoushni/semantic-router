@@ -60,7 +60,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:        "models/mom-domain-classifier",
 		RepoID:           "LLM-Semantic-Router/lora_intent_classifier_bert-base-uncased_model",
-		Aliases:          []string{"domain-classifier", "intent-classifier", "category-classifier", "category_classifier_modernbert-base_model", "lora_intent_classifier_bert-base-uncased_model"},
+		Aliases:          []string{"domain-classifier", "intent-classifier", "category-classifier", "category_classifier_modernbert-base_model", "lora_intent_classifier_bert-base-uncased_model", "mmbert32k-intent-classifier-merged"},
 		Purpose:          PurposeDomainClassification,
 		Description:      "BERT-based domain/intent classifier with LoRA adapters for MMLU categories",
 		ParameterSize:    "110M + LoRA",
@@ -88,7 +88,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:        "models/mom-mmbert-pii-detector",
 		RepoID:           "llm-semantic-router/mmbert-pii-detector-merged",
-		Aliases:          []string{"mmbert-pii-detector", "mmbert-pii-detector-merged", "pii_classifier_modernbert-base_presidio_token_model", "pii_classifier_modernbert-base_model", "pii_classifier_modernbert_model", "pii_classifier_modernbert_ai4privacy_token_model"},
+		Aliases:          []string{"mmbert-pii-detector", "mmbert-pii-detector-merged", "mmbert32k-pii-detector-merged", "pii_classifier_modernbert-base_presidio_token_model", "pii_classifier_modernbert-base_model", "pii_classifier_modernbert_model", "pii_classifier_modernbert_ai4privacy_token_model"},
 		Purpose:          PurposePIIDetection,
 		Description:      "ModernBERT-based merged PII detector for token-level classification",
 		ParameterSize:    "149M",
@@ -102,7 +102,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:        "models/mom-jailbreak-classifier",
 		RepoID:           "LLM-Semantic-Router/jailbreak_classifier_modernbert-base_model",
-		Aliases:          []string{"jailbreak-detector", "prompt-guard", "safety-classifier", "jailbreak_classifier_modernbert-base_model", "lora_jailbreak_classifier_bert-base-uncased_model", "jailbreak_classifier_modernbert_model"},
+		Aliases:          []string{"jailbreak-detector", "prompt-guard", "safety-classifier", "jailbreak_classifier_modernbert-base_model", "lora_jailbreak_classifier_bert-base-uncased_model", "jailbreak_classifier_modernbert_model", "mmbert32k-jailbreak-detector-merged"},
 		Purpose:          PurposeJailbreakDetection,
 		Description:      "ModernBERT-based jailbreak/prompt injection detector",
 		ParameterSize:    "149M",
@@ -129,7 +129,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:        "models/mom-halugate-detector",
 		RepoID:           "KRLabsOrg/lettucedect-base-modernbert-en-v1",
-		Aliases:          []string{"hallucination-detector", "halugate-detector", "lettucedect"},
+		Aliases:          []string{"hallucination-detector", "halugate-detector", "lettucedect", "mmbert32k-fact-check-merged", "mmbert32k-factcheck-classifier-merged"},
 		Purpose:          PurposeHallucinationDetector,
 		Description:      "ModernBERT-based hallucination detector for accurate verification",
 		ParameterSize:    "149M",
@@ -155,7 +155,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:        "models/mom-feedback-detector",
 		RepoID:           "llm-semantic-router/feedback-detector",
-		Aliases:          []string{"feedback-detector", "user-feedback-classifier"},
+		Aliases:          []string{"feedback-detector", "user-feedback-classifier", "mmbert32k-feedback-detector-merged"},
 		Purpose:          PurposeFeedbackDetection,
 		Description:      "ModernBERT-based user feedback classifier for 4 feedback types",
 		ParameterSize:    "149M",
